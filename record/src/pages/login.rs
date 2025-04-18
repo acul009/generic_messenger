@@ -1,6 +1,7 @@
 use adaptors::{discord::Discord, Messanger};
 use futures::join;
 use iced::{
+    alignment::Vertical::Bottom,
     widget::{column, combo_box::State, Button, Column, ComboBox, Container, TextInput},
     Alignment, Element, Task,
 };
@@ -27,9 +28,9 @@ impl Display for Platform {
     }
 }
 impl Platform {
-    pub fn to_messanger(&self, auth: String) -> Box<dyn Messanger> {
+    pub fn to_messanger(&self, auth: String) -> Arc<dyn Messanger> {
         match self {
-            Self::Discord => Box::new(Discord::new(&auth)),
+            Self::Discord => Arc::new(Discord::new(&auth)),
             Self::Test => todo!(),
         }
     }
@@ -52,85 +53,78 @@ pub enum Message {
     PlatformInput(Platform),
     TokenInput(String),
     SubmitToken,
-    AuthFromToken(Result<MessangerWindow, Arc<dyn error::Error + Send + Sync>>),
+    LoginSuccess(Arc<dyn Messanger>),
+    LoginError(String),
 }
-// TODO: Automate
-impl Into<MyAppMessage> for Message {
-    fn into(self) -> MyAppMessage {
-        MyAppMessage::Login(self)
-    }
+
+pub enum Action {
+    Login(Arc<dyn Messanger>),
+    Run(Task<Message>),
+    None,
 }
-//
 
 pub struct Login {
-    auth: Arc<RwLock<AuthStore>>,
     platform: State<Platform>,
     selected_platform: Platform,
     token: String,
+    error: Option<String>,
 }
 impl Login {
-    pub fn new(auth: Arc<RwLock<AuthStore>>) -> Self {
+    pub fn new() -> Self {
         // TODO: Automate addition of new enum varients in here
         let service = State::new(vec![Platform::Discord, Platform::Test]);
         Self {
-            auth,
             platform: service,
             selected_platform: Platform::Test,
             token: String::new(),
+            error: None,
         }
     }
-}
-impl Page for Login {
-    fn update(&mut self, message: MyAppMessage) -> UpdateResult<MyAppMessage> {
-        if let MyAppMessage::Login(message) = message {
-            match message {
-                Message::PlatformInput(platform) => {
-                    println!("{:?}", platform);
-                    self.selected_platform = platform;
-                }
-                Message::TokenInput(change) => self.token = change,
-                Message::SubmitToken => {
-                    // TODO: Disable submit button until the operation ether
-                    let auth = self.selected_platform.to_messanger(self.token.clone());
 
-                    smol::block_on(async {
-                        self.auth.write().await.add_auth(auth.into());
-                    });
+    pub fn update(&mut self, message: Message) -> Action {
+        match message {
+            Message::PlatformInput(platform) => {
+                println!("{:?}", platform);
+                self.selected_platform = platform;
+            }
+            Message::TokenInput(change) => {
+                self.token = change;
+            }
+            Message::SubmitToken => {
+                // TODO: Disable submit button until the operation ether
 
-                    // return UpdateResult::None;
-                    return UpdateResult::Task(Task::perform(
-                        MessangerWindow::new(self.auth.clone()),
-                        |r| MyAppMessage::Login(Message::AuthFromToken(r)),
-                    ));
-                    // return UpdateResult::Task(Task::perform(
-                    //     (self.auth.write(), MessangerWindow::new(self.auth.clone())),
-                    //     |(a, r)| {
-                    //         println!("tes");
-                    //         MyAppMessage::Login(Message::AuthFromToken(r))
-                    //     },
-                    // ));
-                }
-                Message::AuthFromToken(res) => {
-                    let chat = res.unwrap();
-                    smol::block_on(async {
-                        self.auth.write().await.save_to_disk();
-                    });
-                    return UpdateResult::Page(Box::new(chat));
-                }
+                let platform = self.selected_platform.clone();
+                let token = self.token.clone();
+
+                return Action::Run(Task::future(async move {
+                    let messanger = platform.to_messanger(token);
+                    // Todo: check if login works
+                    if true {
+                        Message::LoginSuccess(messanger)
+                    } else {
+                        Message::LoginError("Invalid token".to_string())
+                    }
+                }));
+            }
+            Message::LoginSuccess(messenger) => {
+                return Action::Login(messenger);
+            }
+            Message::LoginError(error) => {
+                self.error = Some(error);
             }
         }
 
-        UpdateResult::None
+        Action::None
     }
 
-    fn view(&self) -> Element<MyAppMessage> {
+    pub fn view(&self) -> Element<Message> {
         let width = 360.0;
 
         let select_platform = ComboBox::new(
             &self.platform,
             "Platform",
             Some(&self.selected_platform),
-            |platform| MyAppMessage::Login(Message::PlatformInput(platform)),
+            |platform| Message::PlatformInput(platform),
         );
 
         let auth_input = self
@@ -140,7 +134,7 @@ impl Page for Login {
             .filter_map(|method| match method {
                 LoginMethods::Token => Some(Element::from(
                     TextInput::new("Token", self.token.as_str())
-                        .on_input(|text| MyAppMessage::Login(Message::TokenInput(text))),
+                        .on_input(|text| Message::TokenInput(text)),
                 )),
                 LoginMethods::Unkown => None,
             })
@@ -150,7 +144,7 @@ impl Page for Login {
             "Login",
             select_platform,
             auth_input,
-            Button::new("Submit").on_press(MyAppMessage::Login(Message::SubmitToken))
+            Button::new("Submit").on_press(Message::SubmitToken)
         ]
         .width(iced::Length::Fixed(width))
         .align_x(Alignment::Center)

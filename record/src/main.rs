@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use auth::AuthStore;
 use iced::{window, Element, Task};
-use pages::{chat::MessangerWindow, Login, MyAppMessage, Page};
+use pages::{chat::MessangerWindow, Login, MyAppMessage};
 use smol::lock::RwLock;
 
 mod auth;
@@ -22,42 +22,63 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-struct App {
-    memoryless_page: Box<dyn Page>,
+enum Page {
+    Login(Login),
+    Todo,
 }
+
+struct App {
+    auth_store: AuthStore,
+    page: Page,
+}
+
 impl Default for App {
     fn default() -> Self {
         let auth_store = AuthStore::new("./LoginInfo".into());
-        let is_store_empty = auth_store.is_empty();
-        let auth_store = Arc::new(RwLock::new(auth_store));
 
-        let memoryless_page: Box<dyn Page>;
-        if is_store_empty {
-            memoryless_page = Box::new(Login::new(auth_store.clone()));
+        let page = if auth_store.is_empty() {
+            Page::Login(Login::new())
         } else {
-            let m =
-                smol::block_on(async { MessangerWindow::new(auth_store.clone()).await.unwrap() });
-            memoryless_page = Box::new(m);
-        }
+            Page::Todo
+        };
 
-        Self { memoryless_page }
+        Self { auth_store, page }
     }
 }
+
 impl App {
     fn title() -> &'static str {
         "record"
     }
     fn update(&mut self, message: MyAppMessage) -> impl Into<Task<MyAppMessage>> {
-        match self.memoryless_page.update(message) {
-            pages::UpdateResult::Page(page) => {
-                self.memoryless_page = page;
+        match message {
+            MyAppMessage::Login(message) => {
+                if let Page::Login(login) = &mut self.page {
+                    let action = login.update(message);
+
+                    match action {
+                        pages::login::Action::None => Task::none(),
+                        pages::login::Action::Login(messenger) => {
+                            self.auth_store.add_auth(messenger);
+                            self.page = Page::Todo;
+                            Task::none()
+                        }
+                        pages::login::Action::Run(task) => task.map(MyAppMessage::Login),
+                    }
+                } else {
+                    Task::none()
+                }
+            }
+            MyAppMessage::Chat(message) => {
+                //TODO
                 Task::none()
             }
-            pages::UpdateResult::Task(task) => task,
-            pages::UpdateResult::None => Task::none(),
         }
     }
     fn view(&self, _window: window::Id) -> Element<MyAppMessage> {
-        self.memoryless_page.view()
+        match &self.page {
+            Page::Login(login) => login.view().map(MyAppMessage::Login),
+            Page::Todo => iced::widget::text("Todo").into(),
+        }
     }
 }

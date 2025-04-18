@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::fmt::Debug;
 
 use async_trait::async_trait;
 use types::{Message, MsgsStore, User};
@@ -7,7 +8,7 @@ pub mod discord;
 mod network;
 pub mod types;
 
-pub trait Messanger: Send + Sync {
+pub trait Messanger: Send + Sync + Debug {
     // ID & Auth
     fn name(&self) -> String;
     fn auth(&self) -> String;

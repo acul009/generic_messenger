@@ -1,4 +1,4 @@
-use std::sync::RwLock;
+use std::{fmt::Debug, sync::RwLock};
 
 use crate::{Messanger, MessangerQuery, ParameterizedMessangerQuery};
 
@@ -17,6 +17,12 @@ impl Discord {
             token: token.into(),
             dms: RwLock::new(Vec::new()),
         }
+    }
+}
+
+impl Debug for Discord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Discord").finish()
     }
 }
 
